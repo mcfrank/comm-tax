@@ -1,0 +1,350 @@
+---
+title: "Communication Taxonomy Framework"
+author: "Mike Frank"
+date: "12/11/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+We are interested in exploring referential games with different numbers of participants and incentive structures, with the goal of mapping some of these onto socially important situations like teaching or negotiation. Thus, we attempt to develop a semi-formal taxonomy of the space of such games in the hopes of conducting analyses and experiments that span and compare the interesting parts of this space. 
+
+# Setup
+
+We have a game with $M$ options to choose from and $N$ players. We'll assume that $M >> N$ so there's lots of stuff to choose. Picture a reference game, but the referents have utility values associated with them. 
+
+![](images/market.jpg)
+
+For example, in this array of vegetables, the goal of each player is to choose the vegetable they can resell for the highest price; the price labels are not visible to the players. On each turn, the players all discuss and then they make their choice of vegetable independently, and the true values of the choices are assigned. Let's define three payoff relationships between players  where $U(A)$ is player A's eventual utility and $A$ is the value of their choice: 
+
+* "+" (aligned): $U(A) = U(B) = A+B$,
+* "-" (disaligned): $U(A) = A-B$, $U(B) = B-A$. 
+* "0" (neutral): $U(A) = A$, $U(B) = B$
+
+We'll assert for now that these payoffs are mutually known. We'll also consider that there could be different levels of knowledge about the values of the referents. There are a lot of ways we could set this up, adding complexity, but for now we can think about *full* and *partial* knowledge. Full knowledge is simply (correctly) knowing the values of all referents; partial knowledge is having some uncertainty about them.^[For now, let's not consider the case where an agent thinks they know the values but is wrong; this is interesting but adds a lot of complexity. In our game, agents are optimal learners and they learn from their experiences and maintain uncertainty in their representations.] We're also going to assume full mutual knowledge of the game states throughout -- that is, players know that other players have full or partial knowledge, and that they have aligned or disaligned utilities. 
+
+```{r setup, echo = FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warn = FALSE, message = FALSE)
+options(warn=-1)
+
+library(tidyverse)
+library(igraph)
+library(intergraph)
+library(ggnetwork)
+
+make_network <- function(n = 3, 
+             knowledge = c("partial","partial","partial"), 
+             incentives = c("+","-","0")) {
+  
+  if (n == 3) {
+    graph_from_literal(A-B-C-A) %>% 
+      ggnetwork() %>%
+      rename(node = name) %>%
+      arrange(node) %>%
+      mutate(x = c(.5, .5, .5, 0, 0, 1), 
+             y = c( 1,  1,  1, 0, 0, 0), 
+             xend = c(.5, 0, 1, 0, 1, 1), 
+             yend = c(1, 0, 0, 0, 0, 0)) %>%
+      mutate(knowledge = case_when(node == "A" ~ knowledge[1],
+                                   node == "B" ~ knowledge[2],
+                                   node == "C" ~ knowledge[3]), 
+             link_to = c("A","B","C","B","C","C"), 
+             incentives = c(NA, incentives[1], incentives[2], 
+                            NA, incentives[3], NA))
+  } else if (n == 2) {
+    graph_from_literal(A-B) %>% 
+      ggnetwork() %>%
+      rename(node = name) %>%
+      arrange(node) %>%
+      mutate(x = c(0, 0, 1), 
+             y = c( 0,  0,  0), 
+             xend = c(0, 1, 1), 
+             yend = c(0, 0, 0)) %>%
+      mutate(knowledge = case_when(node == "A" ~ knowledge[1],
+                                   node == "B" ~ knowledge[2]), 
+             link_to = c("A","B","B"), 
+             incentives = c(NA, incentives[1], NA))
+     
+  }
+}
+
+plot_network <- function(net, guide = TRUE) {
+  p <- ggplot(net, 
+         aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(col = incentives)) + 
+    geom_nodes(size = 5) +
+    geom_nodelabel(aes(label = node, fill = knowledge)) +
+    geom_edgelabel(aes(label = incentives, col = incentives)) +
+    theme_blank()
+    
+  if (guide) {
+    p + 
+    scale_color_manual(values = c("-" = "red","+" = "green", "0" = "gray")) + 
+    scale_fill_manual(values = c("none" = "white",
+                                 "full" = "black",
+                                 "partial" = "gray"))
+  } else {
+    p + 
+    scale_color_manual(values = c("-" = "red","+" = "green", "0" = "gray"), 
+                       guide = FALSE) + 
+    scale_fill_manual(values = c("none" = "white",
+                                 "full" = "black",
+                                 "partial" = "gray"), guide = FALSE)
+  }
+}
+
+expand_knowledge <- function(ks) {
+  knowledge <- c()
+  
+  for (i in 1:str_length(ks)) {
+    k <- str_sub(ks, i, i)
+    knowledge <- c(knowledge, 
+                   ifelse(k == "f", "full",
+                          ifelse(k == "p", "partial", "none")))
+  }
+  
+  return(knowledge)
+}
+
+expand_incentives <- function(incentive_string) {
+  incentive_array <- c()
+  
+  for (i in 1:str_length(incentive_string)) {
+    incentive <- str_sub(incentive_string, i, i)
+    incentive_array <- c(incentive_array, 
+                         ifelse(incentive == "+", "+",
+                                ifelse(incentive == "-", "-", "0")))
+  }
+  
+  return(incentive_array)
+}
+```
+
+Let's develop some plotting and visualization tools for playing around with these games. 
+For example, here's a three-way network that we could label as a "teaching" network.
+
+```{r}
+plot_network(make_network(n = 3, 
+                          knowledge = expand_knowledge("fpp"),
+                          incentives = expand_incentives("++0")))
+```
+
+Node A has full knowledge, while B and C have partial knowledge. A has a positive incentive with B and C and they are neutral with respect to one another. The best solutions will be achieved by A providing information to B and C that they do not already have.
+
+Now we consider whether we can taxonomize the combinatoric space provided by these decisions. 
+
+# Two-player reference games
+
+Let's start by enumerating all of the $N=2$ cases. 
+
+```{r n-2, echo = FALSE}
+nets2_conditions <- expand_grid(n = 2, 
+                     incentive = c("-","0","+"), 
+                     knowledge = c("ff","fp","pp")) %>%
+  mutate(idx = 1:n())
+
+nets2 <- nets2_conditions %>%
+  split(.$idx) %>%
+  map_df(function(df) {
+    make_network(n = df$n, knowledge = expand_knowledge(df$knowledge), 
+                 incentives = df$incentive) %>%
+      mutate(idx = df$idx)
+  }) %>%
+  mutate(idx = case_when(idx == 1 ~ "1: adversarial full knowledge",
+                         idx == 2 ~ "2: asymmetric knowledge",
+                         idx == 3 ~ "3: adversarial uncertainty",
+                         idx == 4 ~ "4: independent play",
+                         idx == 5 ~ "5: independent play (altruism?)",
+                         idx == 6 ~ "6: independent play (altruism?)",
+                         idx == 7 ~ "7: cooperation",
+                         idx == 8 ~ "8: standard reference game",
+                         idx == 9 ~ "9: knowledge pooling"))
+
+plot_network(nets2) + 
+  facet_wrap(~idx) + 
+  xlim(-.2,1.2)
+```
+
+* #1 is a standard game theory case where incentives are completely disaligned (zero sum) and knowledge is full. 
+* #2 is an asymmetric knowledge game, as is #3.
+* #4 is pretty uninteresting, as players can just play alone. They gain nothing from communication. 
+* I've labeled #5 and #6 as "altrusim?" because there is no structural incentive for players to pool knowledge, but they might anyway for altruistic reasons. 
+* #7 is pretty uninteresting as two rational players can just pursue their own interests and still get the maximal cooperative payoff.
+* #8 is what we think of as the standard communication game where A has knowledge they need to give to B. 
+* #9 is a variant of #8 where the players need to pool knowledge. 
+
+# Three player reference games
+
+Next let's look at how this space expands when we have three-player games.
+
+```{r n-3, echo = FALSE}
+nets3_conditions <- expand_grid(n = 3, 
+                     incentive = c("+++","++0","++-","+00","+0-","+--",
+                                   "000","00-","0--","---"),
+                       # c("---", "--0", "--+", "-00", "-0+", "-++", 
+                                   # "000", "00+", "0++", "+++"), 
+                     knowledge = c("fff","ffp","fpf","pff","fpp","pfp","ppf","ppp")) %>%
+  mutate(idx = 1:n())
+
+nets3 <- nets3_conditions %>%
+  split(.$idx) %>%
+  map_df(function(df) {
+    make_network(n = df$n, knowledge = expand_knowledge(df$knowledge), 
+                 incentives = expand_incentives(df$incentive)) %>%
+      mutate(idx = df$idx)
+  }) 
+
+plot_network(nets3) + 
+  facet_wrap(~idx) + 
+  xlim(-.5,1.5) + 
+  ylim(-.5,1.5) +
+  theme(strip.background = element_blank(), 
+        strip.text.x = element_blank()) 
+```
+
+This gets overwhelming very fast because you have to cross knowledge states fully with incentive/role relationships. (Note that we could consolidate some of these by rotating them and making them identical without loss of generality -- I haven't done that but we certainly could). 
+
+For now, let's isolate some sets of these and discuss them in turn. First, let's consider cases where everyone is on a level playing field in terms of knowledge. This gives us a more manageable matrix. 
+
+```{r}
+nets3_p_conditions <- expand_grid(n = 3, 
+                     incentive = c("+++", "++0", "++-", "+00", "+0-", "+--",
+                                   "000", "00-", "0--", "---"), 
+                     knowledge = c("ppp")) %>%
+  mutate(idx = 1:n())
+
+nets3p <- nets3_p_conditions %>%
+  split(.$idx) %>%
+  map_df(function(df) {
+    make_network(n = df$n, knowledge = expand_knowledge(df$knowledge), 
+                 incentives = expand_incentives(df$incentive)) %>%
+      mutate(idx = df$idx)
+  }) 
+
+plots <- nets3p %>%
+  split(.$idx) %>%
+  map(function(df) {
+    plot_network(df, guide = FALSE) +
+      theme(strip.background = element_blank(), 
+            strip.text.x = element_blank()) +
+      xlim(-.5,1.5) + 
+      ylim(-.5,1.5)
+    })
+
+ggpubr::ggarrange(plotlist = plots[c(1, 2, 4,  7,
+                                     3, 5, 8,  NA,
+                                     6, 9, NA, NA,
+                                     10)], 
+                  nrow = 4, ncol = 4, 
+                  labels = c(1, 2, 3, 4, 5, 6, 7, NA, 8, 9, NA, NA, 10))
+```
+
+I've arranged these into a triangular matrix where the three corners are all aligned utilities (#1), all neutral utilities (#4), and all disaligned utilities (#10). 
+
+In this arrangement, I see perhaps five groups:
+
+* cooperation (#1): everyone should share information
+* beneficient actor (#2 and #5): A has an interest in sharing information with both of the others, even if they do not have an interest in sharing with one another. 
+* coalitions (#3, #6, #8, and #9): In all of these, A and B have an interest in sharing information with one another because their incentives are aligned, but they have either no interest or an active negative interest in that information being shared with others. #6 and #8 require some kind of covert signaling to avoid sharing information with the "adversary." Scenario #9 turns into this as well, I believe, because A and B have a common enemy, so they share an interest in withholding information from them. 
+* altruisim games (#4 and #7): there's no incentive reason for agents to share information, but maybe they should anyway? This altruism is perhaps quashed in scenario #7, where A could share information (similar to #5) but the animus between B and C might reduce this 
+* perfect disalignment (#10): it's unclear to me what the prediction here is. It's in everyone's interest not to share information, so maybe you just don't say anything. Or perhaps it's like the game of Mafia where you try to decieve people even though their incentive is just to avoid listening to you altogether.
+
+Next we can consider how adding some participants with perfect information changes these scenarios. In general, I think that giving everyone perfect information just makes things a bit less interesting in these cames -- in that language isn't conveying any information about the utilities and there is just an optimal non-communicative game theoretic solution. Let's consider how this looks.
+
+## Cooperation games
+
+We'll start with pure cooperation games (#37-#40). 
+
+```{r}
+plot_network(filter(nets3,idx %in% 1:8)) + 
+  facet_wrap(~idx) + 
+  xlim(-.5,1.5) + 
+  ylim(-.5,1.5) +
+  theme(strip.background = element_blank())
+```
+
+I don't think these are affected in a particularly interesting way by asymmetries of information -- the optimal communication strategy is just for everyone to share all their information if there is any partial knowledge at all. In the case where all knowlege is shared (and of course mutually known to be shared, #9), then communication is unnecessary. 
+
+**Real-world analogues**: Any kind of cooperative puzzle solving issue when people are on a team together. 
+
+## Beneficient actor games
+
+This next set of games (#2 and #5 above) is quite interesting under asymmetric knowledge.
+
+```{r}
+plot_network(filter(nets3,idx %in% c(9:24))) + 
+  facet_wrap(~idx) + 
+  xlim(-.5,1.5) + 
+  ylim(-.5,1.5) +
+  theme(strip.background = element_blank()) 
+```
+
+Here we have actor A, who has an aligned interest with both others (B and C). Now the knowledge states seem like they make a difference.  In the full knowledge conditions, again, it's not necessary to communicate. But in partial knowledge conditions, the knowledge state asymmetry seems important. In particular, if it's A who has more knowledge, then it feels quite beneficient to share that with the other two -- a lot like teaching or guiding (#11). Same for #21, which seems analogous to a lot of arbitration/judgment scenarios (or teaching two very competitive pupils). I think these are two of the most interesting scenarios. 
+
+Other scenarios here are different and interesting. For example, #12 is like two parents who can both provide the same information to a child. (Their incentives are yoked, same as in #16, because they receive more utility if the other actor provides knowledge).
+
+Scenario #24 and other related scenarios are pretty interesting because it puts each of the actors in a quandry -- they have to decide whether sharing is better or worse for them. Probably the details of the utility matter here. 
+
+I have a little less to say about the asymmetric knowledge cases like #14/#15. I guess here it feels like it reduces to a dyadic partial knowledge case where the two partial knowledge participants should coordinate with one another. 
+
+**Real-world analogues**: Teaching, rule-making and governance.
+
+## Altrusim games
+
+```{r}
+plot_network(filter(nets3,idx %in% 49:64)) + 
+  facet_wrap(~idx) + 
+  xlim(-.5,1.5) + 
+  ylim(-.5,1.5) +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_blank())
+```
+
+The knowledge state asymmetries here feel like they have a big effect on whether you feel you *should* donate knowledge to other people. If you have more knowledge than someone else, it seems nice to donate some of it to them. And the assignment of knowledge states also feels important for the lower cases (where two participants have disaligned utilities.
+
+**Real-world analogues**: Perhaps charitable giving?
+
+## Coalition games
+
+I won't plot all of these. I think regardless of knowledge state within a coalition, if there is a player who is disaligned with one or both coalition members, then communication needs to be sensitive to information leakage. That's pretty interesting and might give rise to lots of strategic communication. 
+
+**Real-world analogues**: Lots of negotiation and bargaining cases. Strategic alliances in business, maybe?
+
+## Adversarial games
+
+```{r}
+plot_network(filter(nets3,idx %in% 73:80)) + 
+  facet_wrap(~idx) + 
+  xlim(-.5,1.5) + 
+  ylim(-.5,1.5) +
+  theme(strip.background = element_blank(),
+        strip.text.x = element_blank())
+```
+
+(Note that these are redundant -- because the incentives are the same, they can be rotated and collapsed). 
+
+I'm honestly not sure how these are affected by different knowledge states -- I'd have to think this through more. Probably not so much. There do seem like there are interesting deception possibilities though when you get asymmetric knowledge: for example, if you are a single actor who has perfect knowledge then you could in principle pit the two others against one another. Some of this probably also depends pretty critically on the mutual knowledge assumption -- you would almost certainly treat someone differently in a game if you knew they had full knowledge. 
+
+**Real-world analogues**: Capitalism in general. 
+
+# Conclusions
+
+## Summary thoughts
+
+There is some start at a taxonomy here for three-player games. Assuming that we continue the "round table" game -- with a fully-connected graph -- then we could try to generalize to $N=4$. Some aspects of our taxonomy will probably be general -- for example, our analysis of pure cooperative and pure competitive games. On the other hand, there may be other complex four-party games that don't fit in here. 
+
+There are some limitations here, of course. One that jumps out to me is that I discretized utilities and knowledge states. This is probably wrong but maybe useful; many real games are fun because they have partial disalignment of utilities and partial alignment. We should think about this decision going forward. 
+
+Interesting challenge for humans but especially for artificial agents: how do you know what game you are in? Recognizing games is probably pretty tricky; misrecognizing what game you're in might lead to some interesting pathologies. 
+
+## Upshot 
+
+If I had to start by doing human experiments, I would collect human conversations around repeated trials of all eight of the dyadic games (with games set up between subjects) and compare them with some baselines in terms of their utilities and amount of conversation. One very simple measure would be how much people talk in all of the games. For example, in the perfect knowledge games do they actually communicate less or at all (perhaps across rounds)? Another would be how close they get to various RL agents' maximal utilities. 
+
+I would then move on to try and explore the five different categories delineated here, paying special attention to the beneficience and coalition games, which feel like they are pretty related to many socially-relevant scenarios where language is extremely important. 
+
+
+
